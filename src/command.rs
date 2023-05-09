@@ -1,7 +1,8 @@
 use std::io::{stdout, Write};
 use std::{ffi::CString, io::stdin};
 
-use nix::{libc, unistd::write};
+use nix::sys::signal::Signal::SIGINT;
+use nix::sys::signal::{signal, SigHandler};
 
 use nix::{
     sys::wait::{waitpid, WaitPidFlag},
@@ -21,20 +22,28 @@ impl Command {
             let user = std::env::var("USER").unwrap_or_default();
             let user_dir = std::env::current_dir().unwrap();
 
+            // Show prompt with user and current directory
             print!("{} in {}> ", user, user_dir.display());
             stdout().flush().unwrap();
 
             let cmd = Self::get_input();
+
+            unsafe {
+                // Ignore SIGINT in parent process
+                signal(SIGINT, SigHandler::SigIgn).unwrap();
+            }
+
             match unsafe { fork() } {
                 Ok(ForkResult::Parent { child, .. }) => {
                     if child.as_raw() > 0 {
                         waitpid(child, Some(WaitPidFlag::WUNTRACED)).unwrap();
                     } else {
-                        Self::print("Error: fork failed")
+                        eprintln!("error: fork failed")
                     }
                 }
 
                 Ok(ForkResult::Child) => match cmd.program.as_str() {
+                    // TODO: This does not work as expected
                     "exit" => std::process::exit(0),
 
                     "cd" => {
@@ -46,27 +55,29 @@ impl Command {
 
                         match chdir(path) {
                             Ok(_) => {}
-                            Err(e) => Self::print(e.desc()),
+                            Err(e) => eprintln!("{}", e),
                         }
 
                         continue;
                     }
 
                     _ => {
+                        // Restore default SIGINT handler
+                        unsafe { signal(SIGINT, SigHandler::SigDfl).unwrap() };
+
                         let filename = CString::new(cmd.program.as_str()).unwrap();
                         let result = execvp(&filename, &cmd.args);
 
                         match result {
                             Ok(_) => {}
-                            Err(_) => Self::print(
-                                format!("{}: command not found", filename.to_string_lossy())
-                                    .as_str(),
-                            ),
+                            Err(_) => {
+                                eprintln!("{}: command not found", filename.to_str().unwrap())
+                            }
                         }
                     }
                 },
 
-                Err(e) => Self::print(e.desc()),
+                Err(e) => eprintln!("{}", e),
             }
         }
     }
@@ -86,9 +97,5 @@ impl Command {
             program: command.unwrap_or_default().to_string(),
             args,
         }
-    }
-
-    fn print(message: &str) {
-        write(libc::STDOUT_FILENO, format!("{}\n", message).as_bytes()).unwrap();
     }
 }
