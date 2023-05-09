@@ -6,7 +6,7 @@ use std::{
 use nix::{
     libc,
     sys::wait::{waitpid, WaitPidFlag},
-    unistd::{execvp, fork, write, ForkResult},
+    unistd::{chdir, execvp, fork, write, ForkResult},
 };
 
 #[derive(Debug, Clone)]
@@ -36,7 +36,7 @@ impl Command {
 
 fn main() {
     loop {
-        print!("rshell> ");
+        print!("rsh> ");
         stdout().flush().unwrap();
 
         let cmd = Command::get_input();
@@ -50,17 +50,30 @@ fn main() {
                 }
             }
 
-            Ok(ForkResult::Child) => {
-                if cmd.program.is_empty() {
+            Ok(ForkResult::Child) => match cmd.program.as_str() {
+                "cd" => {
+                    let path = if cmd.args.len() < 2 {
+                        continue;
+                    } else {
+                        cmd.args[1].to_str().unwrap()
+                    };
+
+                    match chdir(path) {
+                        Ok(_) => {}
+                        Err(e) => std_print(e.desc()),
+                    }
+
                     continue;
                 }
 
-                let result = execvp(&CString::new(cmd.program).unwrap(), &cmd.args);
-                match result {
-                    Ok(_) => {}
-                    Err(e) => std_print(e.desc()),
+                _ => {
+                    let result = execvp(&CString::new(cmd.program).unwrap(), &cmd.args);
+                    match result {
+                        Ok(_) => {}
+                        Err(e) => std_print(e.desc()),
+                    }
                 }
-            }
+            },
 
             Err(e) => std_print(e.desc()),
         }
