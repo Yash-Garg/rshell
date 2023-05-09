@@ -4,7 +4,6 @@ use std::{
 };
 
 use nix::{
-    errno::Errno,
     libc,
     sys::wait::{waitpid, WaitPidFlag},
     unistd::{execvp, fork, write, ForkResult},
@@ -21,15 +20,15 @@ impl Command {
         let mut input = String::new();
         stdin().read_line(&mut input).unwrap();
 
-        let mut parts = input.trim().split_whitespace();
-        let command = parts.next().unwrap_or_default();
+        let parts = input.trim().split_whitespace();
+        let command = parts.to_owned().nth(0);
 
         let args = parts
             .map(|arg| CString::new(arg).unwrap())
             .collect::<Vec<_>>();
 
         Self {
-            program: command.to_string(),
+            program: command.unwrap_or_default().to_string(),
             args,
         }
     }
@@ -44,8 +43,10 @@ fn main() {
 
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child, .. }) => {
-                if child.as_raw() != 0 {
+                if child.as_raw() > 0 {
                     waitpid(child, Some(WaitPidFlag::WUNTRACED)).unwrap();
+                } else {
+                    std_print("Error: fork failed")
                 }
             }
 
@@ -57,15 +58,15 @@ fn main() {
                 let result = execvp(&CString::new(cmd.program).unwrap(), &cmd.args);
                 match result {
                     Ok(_) => {}
-                    Err(e) => eprint(e),
+                    Err(e) => std_print(e.desc()),
                 }
             }
 
-            Err(e) => eprint(e),
+            Err(e) => std_print(e.desc()),
         }
     }
 }
 
-fn eprint(error: Errno) {
-    write(libc::STDOUT_FILENO, format!("{}\n", error).as_bytes()).unwrap();
+fn std_print(message: &str) {
+    write(libc::STDOUT_FILENO, format!("{}\n", message).as_bytes()).unwrap();
 }
