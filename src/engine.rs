@@ -15,7 +15,7 @@ use nix::{
 pub struct Engine {}
 
 impl Engine {
-    pub fn listen() {
+    pub fn start() {
         unsafe {
             // Ignore SIGINT in parent process
             signal(SIGINT, SigHandler::SigIgn).unwrap();
@@ -49,36 +49,40 @@ impl Engine {
                     continue;
                 }
 
-                _ => match unsafe { fork() } {
-                    Ok(ForkResult::Parent { child, .. }) => {
-                        unsafe {
-                            // Restore default SIGINT handler in child process
-                            signal(SIGINT, SigHandler::SigDfl).unwrap();
-                        }
-
-                        if child.as_raw() > 0 {
-                            waitpid(child, Some(WaitPidFlag::WUNTRACED)).unwrap();
-                        } else {
-                            eprintln!("fork failed");
-                            exit(1);
-                        }
-                    }
-
-                    Ok(ForkResult::Child) => {
-                        let filename = CString::new(cmd.program.as_str()).unwrap();
-                        let result = execvp(&filename, &cmd.args);
-
-                        match result {
-                            Ok(_) => {}
-                            Err(_) => {
-                                eprintln!("{}: command not found", filename.to_str().unwrap())
-                            }
-                        }
-                    }
-
-                    Err(e) => eprintln!("{}", e),
-                },
+                _ => Self::fork_and_execute(cmd),
             }
+        }
+    }
+
+    fn fork_and_execute(cmd: Command) {
+        match unsafe { fork() } {
+            Ok(ForkResult::Parent { child, .. }) => {
+                unsafe {
+                    // Restore default SIGINT handler in child process
+                    signal(SIGINT, SigHandler::SigDfl).unwrap();
+                }
+
+                if child.as_raw() > 0 {
+                    waitpid(child, Some(WaitPidFlag::WUNTRACED)).unwrap();
+                } else {
+                    eprintln!("fork failed");
+                    exit(1);
+                }
+            }
+
+            Ok(ForkResult::Child) => {
+                let filename = CString::new(cmd.program.as_str()).unwrap();
+                let result = execvp(&filename, &cmd.args);
+
+                match result {
+                    Ok(_) => {}
+                    Err(_) => {
+                        eprintln!("{}: command not found", filename.to_str().unwrap())
+                    }
+                }
+            }
+
+            Err(e) => eprintln!("{}", e),
         }
     }
 }
