@@ -2,8 +2,8 @@ use crate::command::Command;
 
 use std::ffi::CString;
 use std::io::{stdout, Write};
-use std::process::exit;
 
+use nix::libc::_exit;
 use nix::sys::signal::Signal::SIGINT;
 use nix::sys::signal::{signal, SigHandler};
 
@@ -32,7 +32,7 @@ impl Engine {
             let cmd = Command::get();
 
             match cmd.program.as_str() {
-                "exit" => exit(1),
+                "exit" => unsafe { _exit(1) },
 
                 "cd" => {
                     let path = if cmd.args.len() < 2 {
@@ -66,7 +66,7 @@ impl Engine {
                     waitpid(child, Some(WaitPidFlag::WUNTRACED)).unwrap();
                 } else {
                     eprintln!("fork failed");
-                    exit(1);
+                    unsafe { _exit(1) };
                 }
             }
 
